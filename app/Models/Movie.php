@@ -9,11 +9,13 @@ use Elastic\Elasticsearch\Exception\MissingParameterException;
 use Elastic\Elasticsearch\Exception\ServerResponseException;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Laravel\Scout\Searchable;
 
 
 class Movie extends Model
 {
     use HasFactory;
+    use Searchable;
 
 
 
@@ -75,6 +77,17 @@ class Movie extends Model
         ];
     }
 
+    public function toSearchableArray()
+    {
+        // Define the searchable fields and their values
+        return [
+            'your_searchable_field' => $this->your_searchable_field,
+            'genre' => $this->genre,
+            'crew' => $this->crew,
+            'role' => $this->role,
+            // Add other fields as needed
+        ];
+    }
     public function genres()
     {
         return $this->belongsToMany(Genre::class, 'genre_movie', 'movie_id', 'genre_id');

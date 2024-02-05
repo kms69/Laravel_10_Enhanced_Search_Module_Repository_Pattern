@@ -37,11 +37,20 @@ services:
             - laravel
 
     elasticsearch:
-        image: docker.elastic.co/elasticsearch/elasticsearch:7.15.0
+        image: docker.elastic.co/elasticsearch/elasticsearch:7.17.8  # Updated version
         environment:
             - discovery.type=single-node
         ports:
-            - "9200:9200"
+            - "9208:9200"
+        networks:
+            - laravel
+
+    kibana:
+        image: docker.elastic.co/kibana/kibana:7.17.8  # Matching Elasticsearch version
+        ports:
+            - "56000:5601"
+        depends_on:
+            - elasticsearch
         networks:
             - laravel
 

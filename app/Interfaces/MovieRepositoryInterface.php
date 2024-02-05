@@ -12,7 +12,7 @@ interface MovieRepositoryInterface
     public function create(array $data);
     public function associateGenresAndCrew(Movie $movie, array $genreIds, array $crewIds);
 
-    public function search($query, $genreFilter = null, $crewFilter = null, $sortField = null);
+    public function search(string $query, array $filters = [], array $sorting = []);
 
 
 

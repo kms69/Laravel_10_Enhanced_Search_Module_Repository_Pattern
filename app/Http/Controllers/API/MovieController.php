@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\MovieFormRequest;
 use App\Interfaces\MovieRepositoryInterface;
 use App\Models\Movie;
+use App\Repositories\MovieRepository;
 use Elastic\Elasticsearch\ClientBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -19,27 +20,53 @@ class MovieController extends Controller
         $this->movieRepository = $movieRepository;
     }
 
+    public function store(MovieFormRequest $request)
+    {
+        $data = $request->validated();
+
+        // Create the movie in your database
+        $movie = $this->movieRepository->create($data);
+
+        // Index the movie in Elasticsearch
+        $this->indexMovieInElasticsearch($movie);
+
+        // Associate genres and crew in your database
+        $genreIds = $request->input('genre_id', []);
+        $crewIds = $request->input('crew_id', []);
+        $this->movieRepository->associateGenresAndCrew($movie, $genreIds, $crewIds);
+
+        return response()->json(['message' => 'Movie created successfully']);
+    }
+
+
+
+    protected function indexMovieInElasticsearch(Movie $movie)
+    {
+        $client = ClientBuilder::create()
+            ->setHosts([env('ELASTICSEARCH_HOST', 'localhost')])
+            ->build();
+
+        // Index the movie in Elasticsearch
+        $params = [
+            'index' => 'movies',  // Replace with your Elasticsearch index name
+            'id' => $movie->id,
+            'body' => [
+                'title' => $movie->title,
+                'year' => $movie->year,
+
+            ],
+        ];
+
+        $client->index($params);
+    }
+
+    // ... (other methods)
+
     public function index()
     {
         $movies = Movie::with('crew', 'genres')->get();
 
         return response()->json(['movies' => $movies], 200);
-    }
-
-    public function store(MovieFormRequest $request)
-    {
-        $data = $request->validated();
-
-        $movie = $this->movieRepository->create($data);
-
-
-        $genreIds = $request->input('genre_id', []);
-        $crewIds = $request->input('crew_id', []);
-
-
-        $this->movieRepository->associateGenresAndCrew($movie, $genreIds, $crewIds);
-
-        return response()->json(['message' => 'Movie created successfully']);
     }
 
     public function show($id)
@@ -61,6 +88,8 @@ class MovieController extends Controller
             return response()->json(['message' => 'Movie not found'], 404);
         }
 
+        $this->indexMovieInElasticsearch($movie);
+
         $movie->crew()->sync($request->input('crew_id'));
         $movie->genres()->sync($request->input('genre_id'));
 
@@ -78,80 +107,15 @@ class MovieController extends Controller
         return response()->json(['message' => 'Movie not found'], 404);
     }
 
-//    public function search(Request $request)
-//
-//    {
-//        $query = $request->input('query');
-////        dd($query);
-//        $genreFilter = $request->input('genre');
-//
-//        $crewFilter = $request->input('crew');
-//        $sortField = $request->input('sort');
-//
-//        $cacheKey = 'search:movies:' . md5(implode(':', [$query, $genreFilter, $crewFilter, $sortField]));
-//
-//        $results = Cache::remember($cacheKey, 60, function () use ($query, $genreFilter, $crewFilter, $sortField) {
-//            $params = [
-//                'index' => 'your_index_name',
-//                'body' => [
-//                    'query' => [
-//                        'bool' => [
-//                            'must' => [
-//                                'match' => [
-//                                    'title' => $query,
-//                                ],
-//                            ],
-//                        ],
-//                    ],
-//                ],
-//            ];
-//
-//            // Apply filters
-//            if ($genreFilter) {
-//                $params['body']['query']['bool']['must'][] = [
-//                    'match' => [
-//                        'genres' => $genreFilter,
-//                    ],
-//                ];
-//            }
-//
-//            if ($crewFilter) {
-//                $params['body']['query']['bool']['must'][] = [
-//                    'match' => [
-//                        'crews' => $crewFilter,
-//                    ],
-//                ];
-//            }
-//
-//            // Apply sorting
-//            if ($sortField) {
-//                $params['body']['sort'] = [
-//                    $sortField => 'asc',  // or 'desc' based on your sorting preference
-//                ];
-//            }
-//
-//            $client = ClientBuilder::create()
-//                ->setHosts([env('ELASTICSEARCH_HOST', 'localhost')])
-//                ->build();
-//
-//            $response = $client->search($params);
-//
-//            // Process and return the results
-//            return $response['hits']['hits'];
-//        });
-//
-//        return response()->json(['results' => $results], 200);
-//    }
-    public function search(Request $request)
+
+    public function search(Request $request, MovieRepository $movieRepository)
     {
         $query = $request->input('query');
-        $genreFilter = $request->input('genre');
-        $crewFilter = $request->input('crew');
-        $sortField = $request->input('sort');
+        $filters = $request->input('filters', []); // Convert query string to array
+        $sorting = $request->input('sorting', []); // Convert query string to array
 
-        $results = $this->movieRepository->search($query, $genreFilter, $crewFilter, $sortField);
+        $results = $movieRepository->search($query, $filters, $sorting);
 
-        return response()->json(['results' => $results], 200);
+        return response()->json($results);
     }
-
 }

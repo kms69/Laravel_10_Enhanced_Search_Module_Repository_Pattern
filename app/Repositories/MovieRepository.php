@@ -6,11 +6,29 @@ namespace App\Repositories;
 
 use App\Interfaces\MovieRepositoryInterface;
 use App\Models\Movie;
+
+use Elastic\Elasticsearch\Exception\AuthenticationException;
+use Elastic\Elasticsearch\Exception\ClientResponseException;
+use Elastic\Elasticsearch\Exception\ServerResponseException;
+use Exception;
+
+
 use Elastic\Elasticsearch\ClientBuilder;
+
+
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Redis;
+
 
 class MovieRepository implements MovieRepositoryInterface
 {
+//    protected $redis;
+//
+//    public function __construct(Redis $redis)
+//    {
+//        $this->redis = $redis;
+//    }
     public function all()
     {
         return Movie::all();
@@ -50,54 +68,93 @@ class MovieRepository implements MovieRepositoryInterface
         }
         return false;
     }
-    public function search($query, $genreFilter = null, $crewFilter = null, $sortField = null)
-    {
-        $cacheKey = $this->generateCacheKey('search:movies:', [$query, $genreFilter, $crewFilter, $sortField]);
 
-        return Cache::remember($cacheKey, 60, function () use ($query, $genreFilter, $crewFilter, $sortField) {
-            $params = [
-                'index' => 'your_index_name',
-                'body' => [
-                    'query' => [
-                        'bool' => [
-                            'must' => [
-                                [
-                                    'match' => [
-                                        'title' => $query,
-                                    ],
-                                ],
-                                [
-                                    'match' => [
-                                        'genres' => $genreFilter,
-                                    ],
-                                ],
-                            ],
-                        ],
+
+    /**
+     * @throws AuthenticationException
+     * @throws ClientResponseException
+     * @throws ServerResponseException
+     */
+
+
+
+    public function search(string $query, array $filters = [], array $sorting = []): array
+    {
+        // Cache logic (you can uncomment this if caching is needed)
+        // $cacheKey = md5("movie_search_{$query}_" . serialize(compact('filters', 'sorting')));
+        // $results = Cache::get($cacheKey);
+        // if ($results) {
+        //     return unserialize($results);
+        // }
+
+        // Initialize Elasticsearch client
+        $client = ClientBuilder::create()
+            ->setHosts(['http://elasticsearch:9200'])
+            ->build();
+
+        // Build Elasticsearch query (use multi_match query for multiple fields)
+        $params = [
+            'index' => 'movies',
+            'body' => [
+                'query' => [
+                    'multi_match' => [
+                        'query'  => $query,
+                        'fields' => ['your_searchable_field', 'genre', 'crew', 'role'], // Add other fields as needed
                     ],
                 ],
+            ],
+        ];
+
+        // Apply filters
+        foreach ($filters as $field => $value) {
+            $params['body']['query']['bool']['must'][] = [
+                'term' => [
+                    $field => $value,
+                ],
             ];
+        }
 
-            // Apply sorting
-            if ($sortField) {
-                $params['body']['sort'] = [
-                    $sortField => 'asc',  // or 'desc' based on your sorting preference
-                ];
-            }
+        // Apply sorting
+        foreach ($sorting as $field => $direction) {
+            $params['body']['sort'][] = [
+                $field => [
+                    'order' => $direction,
+                ],
+            ];
+        }
 
-            $client = ClientBuilder::create()
-                ->setHosts([env('ELASTICSEARCH_HOST', 'elasticsearch')])
-                ->build();
+        // Log the Elasticsearch query
+        Log::info('Elasticsearch Query:', ['params' => $params]);
 
+        // Execute Elasticsearch query
+        try {
             $response = $client->search($params);
+        } catch (\Exception $e) {
+            // Log any exception that occurs during the Elasticsearch query
+            Log::error('Elasticsearch Exception:', ['exception' => $e->getMessage()]);
+            return [];
+        }
 
-            // Process and return the results
-            return $response['hits']['hits'];
-        });
+        // Log the Elasticsearch response
+//        Log::info('Elasticsearch Response:', $response);
+
+        // Process and return the results
+        $hits = $response['hits']['hits'];
+        $results = array_map(function ($hit) {
+            return $hit['_source'];
+        }, $hits);
+
+        // Cache results with appropriate TTL and error handling
+        // try {
+        //     Cache::put($cacheKey, serialize($results), 60 * 60); // Cache for 1 hour
+        // } catch (\Exception $e) {
+        //     Log::error('Error caching search results:', ['error' => $e->getMessage()]);
+        //     // Optionally report the error to the user or take other actions as needed
+        // }
+
+        return $results;
     }
 
 
-    protected function generateCacheKey($prefix, $params)
-    {
-        return $prefix . md5(implode(':', $params));
-    }
+
 }
